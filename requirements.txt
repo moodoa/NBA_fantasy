@@ -16,7 +16,7 @@ cycler==0.10.0
 cymysql==0.9.14
 decorator==4.4.1
 defusedxml==0.6.0
-Django==3.0
+Django==3.0.3
 entrypoints==0.3
 fuzzywuzzy==0.17.0
 html5lib==1.0.1
