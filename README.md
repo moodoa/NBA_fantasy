@@ -1,7 +1,7 @@
 # NBA_fantasy
 a predictor for nba fantasy game
 
-![alt text](https://miro.medium.com/max/2880/1*TshXyGsehhGvZXQ9cGNzNQ.jpeg)
+![alt text](https://miro.medium.com/max/540/1*TshXyGsehhGvZXQ9cGNzNQ.jpeg)
 
 logic:
 1. collect players data. (near one month.)
