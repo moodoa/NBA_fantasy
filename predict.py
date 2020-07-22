@@ -1,19 +1,15 @@
-# coding: utf-8
+import re
+import ast
+import time
 import datetime
 import requests
 import pandas as pd
-from bs4 import BeautifulSoup
 from fuzzywuzzy import fuzz
-import threading
+from bs4 import BeautifulSoup
 from selenium import webdriver
-import time
-import ast
-import re
 
-start = datetime.datetime.now()
 
-driver = webdriver.Chrome()
-
+driver = webdriver.Chrome(executable_path=r'C:\your_folider\chromedriver.exe')
 driver.get("http://www.facebook.com/dialog/oauth?client_id=1945821345437674&redirect_uri=https%3A%2F%2Fnba.udn.com%2Ffantasy%2Ffb_check.jsp&auth_type=rerequest&state=&scope=email") 
 time.sleep(2)
 email_input = driver.find_element_by_name('email')
