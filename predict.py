@@ -4,167 +4,133 @@ import time
 import datetime
 import requests
 import pandas as pd
+
+
 from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 from selenium import webdriver
 
-
-driver = webdriver.Chrome(executable_path=r'C:\your_folider\chromedriver.exe')
-driver.get("http://www.facebook.com/dialog/oauth?client_id=1945821345437674&redirect_uri=https%3A%2F%2Fnba.udn.com%2Ffantasy%2Ffb_check.jsp&auth_type=rerequest&state=&scope=email") 
-time.sleep(2)
-email_input = driver.find_element_by_name('email')
-email_input.send_keys('acc')
-pass_input = driver.find_element_by_name('pass')
-pass_input.send_keys('pass')
-start_login = driver.find_element_by_name('login')
-time.sleep(2)
-start_login.click()
-time.sleep(5)
-start_web = driver.find_element_by_class_name('btn-play')
-start_web.click()
-
-htmltext = driver.page_source
-driver.close()
+class NBAPredict:
+    def __init__(self, account, password):
+        option = webdriver.ChromeOptions()
+        option.add_argument("headless")
+        driver = webdriver.Chrome(chrome_options=option,executable_path='./chromedriver.exe')
+        self.webdriver = driver
+        self.account = account
+        self.password = password
 
 
+    def _get_player_status(self):
+        driver = self.webdriver
+        driver.get("http://www.facebook.com/dialog/oauth?client_id=1945821345437674&redirect_uri=https%3A%2F%2Fnba.udn.com%2Ffantasy%2Ffb_check.jsp&auth_type=rerequest&state=&scope=email") 
+        time.sleep(2)
+        email_input = driver.find_element_by_name('email')
+        email_input.send_keys(self.account)
+        pass_input = driver.find_element_by_name('pass')
+        pass_input.send_keys(self.password)
+        start_login = driver.find_element_by_name('login')
+        time.sleep(2)
+        start_login.click()
+        time.sleep(5)
+        start_web = driver.find_element_by_class_name('btn-play')
+        start_web.click()
+        time.sleep(3)
+        htmltext = driver.page_source
+        time.sleep(3)
+        driver.close()
+        htmltext = htmltext.split('_NBA_STATE=')[1]
+        htmltext = htmltext.split(';\nvar historyObject')[0]
+        players_status = ast.literal_eval(htmltext)
+        return players_status
 
-
-soup = BeautifulSoup(htmltext,'html.parser')
-
-web_txt = str(soup)
-
-web_txt = web_txt.split('NBA_STATE=')[1]
-
-web_txt = web_txt.split(';\nvar historyObject')[0]
-
-NBA_STATE = ast.literal_eval(web_txt)
-
-
-def nbastat(mon,day,year):
-#     get the url
-    year = str(year)
-    mon = str(mon)
-    day = str(day)
-    stat_page = requests.get('https://www.basketball-reference.com/friv/dailyleaders.fcgi?month='+mon+'&day='+day+'&year='+year) 
-    content = stat_page.content
-    
-# find the id by beautiful soup
-
-    soup = BeautifulSoup(content, 'html.parser')
-    table = soup.find(name = 'table', attrs = {'id':'stats'})
-    html_str = str(table)
-    
-# covert html to dataframe
-
-    data = pd.read_html(html_str)[0]
-    
-# data processing
-
-    data = data[data['Player'] != 'Player']
-    data['arena'] = data['Unnamed: 3'].apply(lambda x : 'home' if x != '@' else 'guest')
-    data = data.loc[:,['Player','PTS','TRB','AST','STL','BLK','TOV','arena']]
-    col = data.columns
-    for i in col:
-        if i == 'Player' or i == 'arena':
-            pass
-        else:
-            data[i] = data[i].astype(int)
-    data['score'] = data['PTS']*1 + data['TRB']*1.2 + data['AST']*1.5 + data['STL']*3 + data['BLK']*3 - data['TOV']*1
-    data=data.sort_values('score',ascending = False)
-    
-    return data
-
-
-
-
-
-
-
-# for rank
-def top_num(month,day):
-    
-    if month == 1:
-        m = 12
-    else:
-        m = month-1
-    n = day
-    y = 2020
-    players_df = pd.DataFrame()
-    
-    
-    while True:
+    def _get_players_statistics_by_day(self, mon, day, year):
+        year, mon, day = str(year), str(mon), str(day)
+        content = requests.get(f'https://www.basketball-reference.com/friv/dailyleaders.fcgi?month={mon}&day={day}&year={year}').content
+        soup = BeautifulSoup(content, 'html.parser')
+        table = soup.find(name = 'table', attrs = {'id':'stats'})
         try:
-            for_concat = nbastat(m,n,y)
-            players_df = pd.concat([players_df,for_concat])
-        except ValueError:
-            pass
-        n+=1
-        if n > 31:
-            m+=1
-            n = 1
-        if m > 12:
-            m = 1
-            y +=1
-        if m == month and n == day:
-            break
-            
-    players_df_home = players_df[players_df['arena'] == 'home']
-    players_df_guest = players_df[players_df['arena'] == 'guest']
+            players_statistics = pd.read_html(str(table))[0]
+            players_statistics_daily = self._set_arena_score_column(players_statistics)
+        except:
+            players_statistics_daily = pd.DataFrame()
+        return players_statistics_daily
+
+    def _set_arena_score_column(self, players_statistics):
+        players_statistics = players_statistics[players_statistics['Player'] != 'Player']
+        players_statistics['arena'] = players_statistics['Unnamed: 3'].apply(lambda x : 'home' if x != '@' else 'guest')
+        players_statistics = players_statistics.loc[:,['Player','PTS','TRB','AST','STL','BLK','TOV','arena']]
+        columns = players_statistics.columns
+        for column in columns:
+            if column == 'Player' or column == 'arena':
+                pass
+            else:
+                players_statistics[column] = players_statistics[column].astype(int)
+        players_statistics['score'] = players_statistics['PTS']*1 + players_statistics['TRB']*1.2 + players_statistics['AST']*1.5 + players_statistics['STL']*3 + players_statistics['BLK']*3 - players_statistics['TOV']*1
+        players_statistics = players_statistics.sort_values('score',ascending = False)
+        return players_statistics
+        
+    def _concat_daily_stat(self):
+        today = datetime.datetime.now()
+        players_table = pd.DataFrame()
+        for days_ago in range(1,8):
+            date_ago = today - datetime.timedelta(days = days_ago)
+            mon, day, year = date_ago.month, date_ago.day, date_ago.year
+            try:
+                for_concat = self._get_players_statistics_by_day(mon, day, year)
+                players_table = pd.concat([players_table,for_concat])
+            except:
+                pass
+        home_table = self._set_arena_averge_score(players_table, 'home')
+        guest_table = self._set_arena_averge_score(players_table, 'guest')
+        table_with_average_score = pd.concat([home_table,guest_table])
+        table_with_average_score = table_with_average_score.drop_duplicates()
+        return table_with_average_score
     
+    def _set_arena_averge_score(self, players_table, team):
+        players_table = players_table[players_table['arena'] == team]
+        players_table['AVG'] = players_table['Player'].apply(lambda x : players_table[players_table['Player'] == x]['score'].mean())
+        players_table = players_table.loc[:,['Player','AVG','arena']]
+        return players_table
 
-    
-#     home team
-    players_df_home['AVG'] = players_df_home['Player'].apply(lambda x : players_df_home[players_df_home['Player'] == x]['score'].mean())
-    players_df_home = players_df_home.loc[:,['Player','AVG','arena']]
-#     guest team
-    players_df_guest['AVG'] = players_df_guest['Player'].apply(lambda x : players_df_guest[players_df_guest['Player'] == x]['score'].mean())
-    players_df_guest = players_df_guest.loc[:,['Player','AVG','arena']]
+    def _append_position_team(self, players_table, players_status):
+        position_dict, team_dict = self._get_position_team_status(players_status)
+        players_table['position'] = players_table['Player'].apply(lambda player_name:self._is_same_player(position_dict, player_name))
+        players_table['team'] = players_table['Player'].apply(lambda player_name:self._is_same_player(team_dict, player_name))
+        return players_table
 
-    avg_df = pd.concat([players_df_home,players_df_guest])
-    avg_df = avg_df.drop_duplicates()
-    return avg_df
-
-mon = datetime.datetime.now().month
-day = datetime.datetime.now().day
-# get stat from opening until today
-top_table = top_num(mon,day)
-
-# add the position
-trans={str(['F', 'G']):'F-G',str(['G', 'F']):'F-G',str(['F', 'C']):'C-F',str(['C', 'F']):'C-F'
+    def _get_position_team_status(self, players_status):
+        position_trans={str(['F', 'G']):'F-G',str(['G', 'F']):'F-G',str(['F', 'C']):'C-F',str(['C', 'F']):'C-F'
       ,str(['G']):'G',str(['F']):'F',str(['C']):'C',str(['F', 'F']):'F',str(['G', 'G']):'G'
        ,str(['C', 'C']):'C'}
+        position_dict = {}
+        team_dict = {}
+        for idx in range(len(players_status)):
+            position_dict[players_status[idx]['firstName']+' '+players_status[idx]['lastName']] = position_trans[str(players_status[idx]['position'])]
+            team_dict[players_status[idx]['firstName']+' '+players_status[idx]['lastName']] = players_status[idx]['team']  
+        return position_dict, team_dict
 
-position_dict = {}
-for i in range(len(NBA_STATE)):
-    position_dict[NBA_STATE[i]['firstName']+' '+NBA_STATE[i]['lastName']] = trans[str(NBA_STATE[i]['position'])]  
+    def _is_same_player(self, dic, player_name):
+        for key in dic.keys():
+            if fuzz.ratio(key,player_name) >= 80:
+                return dic[key]
+        return ''
+
+    def _team_play_tomorrow(self, players_table):
+        players_table = players_table[players_table['team'] != '']
+        return players_table
 
 
-def tryerror(x):
-    try:
-        return position_dict[x]
-    except KeyError:
-        for name in position_dict.keys():
-            if fuzz.ratio(name,x) >= 80:
-                return position_dict[name]
-
-top_table['position'] = top_table['Player'].apply(lambda x:tryerror(x))
 
 
-# add the team
+# run
+    def predict(self):
+        players_status = self._get_player_status()
+        player_table = self._concat_daily_stat()
+        player_table_with_position_team = self._append_position_team(player_table, players_status)
+        team_tmr = self._team_play_tomorrow(player_table_with_position_team)
 
-team_dict = {}
-for i in range(len(NBA_STATE)):
-    team_dict[NBA_STATE[i]['firstName']+' '+NBA_STATE[i]['lastName']] = NBA_STATE[i]['team']  
-
-def namecheck(name):
-    for n in team_dict.keys():
-        if fuzz.ratio(name,n) >=80:
-            return team_dict[n]
-
-top_table['Team'] = top_table['Player'].apply(lambda x:namecheck(x))
-
-top_table = top_table[top_table['Team'].notnull()]
-
+# TODO
+down there
 
 
 # b2b check
@@ -204,8 +170,8 @@ top_table = top_table[top_table['b2b'] == False]
 
 cost_dict = {}
 
-for i in range(len(NBA_STATE)):
-    cost_dict[NBA_STATE[i]['firstName']+' '+NBA_STATE[i]['lastName']] = int(NBA_STATE[i]['rating'])
+for i in range(len(players_status)):
+    cost_dict[players_status[i]['firstName']+' '+players_status[i]['lastName']] = int(players_status[i]['rating'])
 
 
 
