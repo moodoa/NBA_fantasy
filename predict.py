@@ -11,13 +11,15 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 
 class NBAPredict:
-    def __init__(self, account, password):
+    def __init__(self, account, password, line_group, ifttt_key):
         option = webdriver.ChromeOptions()
         option.add_argument("headless")
         driver = webdriver.Chrome(chrome_options=option,executable_path='./chromedriver.exe')
         self.webdriver = driver
         self.account = account
         self.password = password
+        self.line_group = line_group
+        self.ifttt_key = ifttt_key
 
 
     def _get_player_status(self):
@@ -156,8 +158,6 @@ class NBAPredict:
         team_tmr = team_tmr[team_tmr['cost'].notnull()]
         return team_tmr
 
-
-# run
     def predict(self):
         players_status = self._get_player_status()
         player_table = self._concat_daily_stat()
@@ -168,7 +168,7 @@ class NBAPredict:
         return team_tmr
 
 if __name__ == '__main__':
-    predictor = NBAPredict('aa469413927@yahoo.com.tw','a358302916')
+    predictor = NBAPredict('acc','pass')
     print(predictor.predict())
 
 
@@ -340,7 +340,7 @@ if __name__ == '__main__':
 # # send the result to line
 # def send_ifttt(data):   
 # #     send the report to line
-#     url = ('https://maker.ifttt.com/trigger/nba_fantasy/with/key/btssJUCF_1qKOVluaYsMC1' +
+#     url = (f'https://maker.ifttt.com/trigger/{self.line_group}/with/key/{self.ifttt_key}' +
 #           '?value1='+str(data))
 # #     action!!
 #     r = requests.get(url) 
