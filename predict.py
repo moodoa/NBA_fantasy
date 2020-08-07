@@ -5,7 +5,6 @@ import datetime
 import requests
 import pandas as pd
 
-
 from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -20,7 +19,6 @@ class NBAPredict:
         self.password = password
         self.line_group = line_group
         self.ifttt_key = ifttt_key
-
 
     def _get_player_status(self):
         driver = self.webdriver
@@ -59,7 +57,7 @@ class NBAPredict:
 
     def _set_arena_score_column(self, players_statistics):
         players_statistics = players_statistics[players_statistics['Player'] != 'Player']
-        players_statistics['arena'] = players_statistics['Unnamed: 3'].apply(lambda x : 'home' if x != '@' else 'guest')
+        players_statistics['arena'] = players_statistics['Unnamed: 3'].apply(lambda x : 'home' if x != '@' else 'away')
         players_statistics = players_statistics.loc[:,['Player','PTS','TRB','AST','STL','BLK','TOV','arena']]
         columns = players_statistics.columns
         for column in columns:
@@ -83,8 +81,8 @@ class NBAPredict:
             except:
                 pass
         home_table = self._set_arena_averge_score(players_table, 'home')
-        guest_table = self._set_arena_averge_score(players_table, 'guest')
-        table_with_average_score = pd.concat([home_table,guest_table])
+        away_table = self._set_arena_averge_score(players_table, 'away')
+        table_with_average_score = pd.concat([home_table,away_table])
         table_with_average_score = table_with_average_score.drop_duplicates()
         return table_with_average_score
     
@@ -121,32 +119,17 @@ class NBAPredict:
         players_table = players_table[players_table['team'] != '']
         return players_table
 
-    # selenium issue to solve
     def _set_back_to_back(self, team_tmr):       
-        yesterday = datetime.datetime.now() - datetime.timedelta(days= 1)
-        m, d, y = yesterday.month, yesterday.day, yesterday.year
-        try:
-            driver = self.webdriver
-            driver.get(f'https://stats.nba.com/players/traditional/?DateFrom={m}%2F{d}%2F{y}')
-            time.sleep(5)
-            table = driver.find_element_by_class_name('nba-stat-table__overflow')
-            stat_yesterday = table.text
-            time.sleep(5)
-            driver.close()
-            split_stat = stat_yesterday.split('\n')
-            b2b_teams = []
-            for idx in range(1,len(split_stat)):
-                try:
-                    team = split_stat[3*idx].split(' ')[0]
-                    if team not in b2b_teams:
-                        b2b_teams.append(team)
-                except IndexError:
-                    pass
-        except:
-            driver.close()
-            b2b_teams = []
-            pass
-        team_tmr['b2b'] = team_tmr['team'].apply(lambda x : True if x in b2b_teams else False)
+        today = (datetime.datetime.now()-datetime.timedelta(days = 1)).strftime('%Y%m%d')
+        content = requests.get(f'https://www.espn.com/nba/schedule/_/date/{today}').content
+        soup = BeautifulSoup(content,'html.parser')
+        html = soup.find_all(name='table', attrs={'class':'schedule'})
+        game_result = pd.read_html(str(html))[0]
+        teams_played_today = []
+        for two_team in game_result['result'].tolist():
+            teams_played_today.append(two_team.split(' ')[0])
+            teams_played_today.append(two_team.split(' ')[2])
+        team_tmr['b2b'] = team_tmr['team'].apply(lambda x : True if x in teams_played_today else False)
         no_b2b_teams = team_tmr[team_tmr['b2b'] == False]
         return no_b2b_teams
 
@@ -158,106 +141,63 @@ class NBAPredict:
         team_tmr = team_tmr[team_tmr['cost'].notnull()]
         return team_tmr
 
+    def _set_injury_players(self, team_tmr):
+        content = requests.get('https://www.cbssports.com/nba/injuries/').content
+        soup = BeautifulSoup(content,'html.parser')
+        table = soup.find(name= 'div' ,attrs= {'class':'Page-colMain'})
+        injury_players = pd.read_html(str(table))
+        players_full_name = soup.find_all(name='span',attrs={'class':'CellPlayerName--long'})
+        injury_players = []
+        for html in players_full_name:
+            injury_players.append(html.find('a').text)
+        team_tmr['injury'] = team_tmr['Player'].apply(lambda x: self._is_injury(x, injury_players))
+        return team_tmr
+    
+    def _is_injury(self, player, injury_players):
+        for injury_player in injury_players:
+            if fuzz.ratio(player, injury_player) >= 80:
+                return True
+        return False
+    
+    def _set_away_home(self, team_tmr):
+        today = datetime.datetime.now()
+        m, d, y = today.strftime('%m'), today.strftime('%d'), today.strftime('%Y')
+        content = requests.get(f'https://stats.nba.com/scores/{m}/{d}/{y}').content
+        soup = BeautifulSoup(content,'html.parser')
+        web_string = str(soup)
+        away_home_teams = re.findall(r'\d+\\/(\D{6})',web_string)
+        team_home = []
+        team_away = []
+        for team in away_home_teams:
+            team_away.append(team[0:3])
+            team_home.append(team[3::])
+        home = self._arena_filter(team_tmr, team_home, 'home')
+        away = self._arena_filter(team_tmr, team_away, 'away')
+        team_tmr = pd.concat([home,away])
+        return team_tmr
+
+    def _arena_filter(self, team_tmr, team_arena, home_away):
+        df = pd.DataFrame()
+        for team in team_arena:
+            for_concat = team_tmr[(team_tmr['team'] == team)&(team_tmr['arena'] == home_away)]
+            df = pd.concat([df,for_concat])
+        return df
+
     def predict(self):
         players_status = self._get_player_status()
         player_table = self._concat_daily_stat()
         player_table_with_position_team = self._append_position_team(player_table, players_status)
         team_tmr = self._team_play_tomorrow(player_table_with_position_team)
-        # no_b2b_teams = self._set_back_to_back(team_tmr)
+        team_tmr = self._set_back_to_back(team_tmr)
         team_tmr = self._append_cost(team_tmr, players_status)
+        team_tmr = self._set_injury_players(team_tmr)
+        team_tmr = self._set_away_home(team_tmr)
         return team_tmr
 
 if __name__ == '__main__':
-    predictor = NBAPredict('acc','pass')
+    predictor = NBAPredict('acc','pass', 'a', 'b')
     print(predictor.predict())
 
-
-
-
-
-
-
-
-
-# # injury list
-
-# # get the injury list from web
-# url = requests.get('https://www.cbssports.com/nba/injuries/')
-
-# content = url.content
-
-# soup = BeautifulSoup(content,'html.parser')
-
-# table = soup.find(name= 'div' ,attrs= {'class':'Page-colMain'})
-
-# html_str = str(table)
-
-# data2 = pd.read_html(html_str)[0]
-
-# # concat all teams list
-# for i in range(1,31):
-#     try:
-#         for_concat = pd.read_html(html_str)[i]
-#         data2 = pd.concat([data2,for_concat])
-#     except IndexError:
-#         break
-# # fix the name and injury stat
-# data2['Injury_man'] = data2['Player'].apply(lambda x:x.split(' ',2)[2])
-# # data2 = data2.reset_index()
-# data2 = data2.sort_values('Injury Status')
-# data2['status'] = data2['Injury Status'].apply(lambda x :x.split(' ',7)[7] if len(x)>18 else x )
-# data2['status'] = data2['status'].apply(lambda x :x.split(' ',1)[0] if len(x)>10 else x )
-# data2 = data2.loc[:,['Injury_man','status']]
-# data2 = data2.set_index('status')
-
-# injury_list = data2['Injury_man'].values
-
-# def injurycheck(name):
-#     for n in injury_list:
-#         if fuzz.ratio(name,n)>=80:
-#             return True
-#     return False
-
-# tmr_set['injury'] = tmr_set['Player'].apply(lambda x: injurycheck(x))
-
-# tmr_set = tmr_set[tmr_set['injury'] == False]
-
-
-# # arena for home and guest
-
-# mon = datetime.datetime.now().month
-# day = datetime.datetime.now().day
-# day = str(day)
-# if len(day)<2:
-#     day = '0'+day
-# web = requests.get('https://stats.nba.com/scores/0'+str(mon)+'/'+day+'/2020')
-# content = web.content
-# soup = BeautifulSoup(content,'html.parser')
-# web_string = str(soup)
-# team_messy = re.findall(r'\d+\\/\D{6}',web_string)
-# team_tmr = []
-# for t in team_messy:
-#     team_tmr.append(t.split('/')[1])
-# team_home = []
-# team_guest = []
-# for t in team_tmr:
-#     team_guest.append(t[0:3])
-#     team_home.append(t[3::])
-
-# home = pd.DataFrame()
-
-# for t in team_home:
-#     for_concat = tmr_set[(tmr_set['Team'] == t)&(tmr_set['arena'] == 'home')]
-#     home = pd.concat([home,for_concat])
-
-# guest = pd.DataFrame()
-
-# for t in team_guest:
-#     for_concat = tmr_set[(tmr_set['Team'] == t)&(tmr_set['arena'] == 'guest')]
-#     guest = pd.concat([guest,for_concat])
-
-
-# tmr_set = pd.concat([home,guest])
 
 
 # # make a filter and weight the AVG 
