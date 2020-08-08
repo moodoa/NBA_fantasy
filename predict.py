@@ -380,7 +380,7 @@ predict = predict.set_index('Team')
 # send the result to line
 def send_ifttt(data):   
 #     send the report to line
-    url = ('https://maker.ifttt.com/trigger/nba_fantasy/with/key/btssJUCF_1qKOVluaYsMC1' +
+    url = ('https://maker.ifttt.com/trigger/line_group/with/key/ifttt_key' +
           '?value1='+str(data))
 #     action!!
     r = requests.get(url) 
