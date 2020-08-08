@@ -42,7 +42,24 @@ class NBAPredict:
         htmltext = htmltext.split(';\nvar historyObject')[0]
         players_status = ast.literal_eval(htmltext)
         return players_status
-
+        
+    def _concat_daily_stat(self):
+        today = datetime.datetime.now()
+        players_table = pd.DataFrame()
+        for days_ago in range(1,8):
+            date_ago = today - datetime.timedelta(days = days_ago)
+            mon, day, year = date_ago.month, date_ago.day, date_ago.year
+            try:
+                for_concat = self._get_players_statistics_by_day(mon, day, year)
+                players_table = pd.concat([players_table,for_concat])
+            except:
+                pass
+        home_table = self._set_arena_averge_score(players_table, 'home')
+        away_table = self._set_arena_averge_score(players_table, 'away')
+        table_with_average_score = pd.concat([home_table,away_table])
+        table_with_average_score = table_with_average_score.drop_duplicates()
+        return table_with_average_score
+    
     def _get_players_statistics_by_day(self, mon, day, year):
         year, mon, day = str(year), str(mon), str(day)
         content = requests.get(f'https://www.basketball-reference.com/friv/dailyleaders.fcgi?month={mon}&day={day}&year={year}').content
@@ -68,23 +85,6 @@ class NBAPredict:
         players_statistics['score'] = players_statistics['PTS']*1 + players_statistics['TRB']*1.2 + players_statistics['AST']*1.5 + players_statistics['STL']*3 + players_statistics['BLK']*3 - players_statistics['TOV']*1
         players_statistics = players_statistics.sort_values('score',ascending = False)
         return players_statistics
-        
-    def _concat_daily_stat(self):
-        today = datetime.datetime.now()
-        players_table = pd.DataFrame()
-        for days_ago in range(1,8):
-            date_ago = today - datetime.timedelta(days = days_ago)
-            mon, day, year = date_ago.month, date_ago.day, date_ago.year
-            try:
-                for_concat = self._get_players_statistics_by_day(mon, day, year)
-                players_table = pd.concat([players_table,for_concat])
-            except:
-                pass
-        home_table = self._set_arena_averge_score(players_table, 'home')
-        away_table = self._set_arena_averge_score(players_table, 'away')
-        table_with_average_score = pd.concat([home_table,away_table])
-        table_with_average_score = table_with_average_score.drop_duplicates()
-        return table_with_average_score
     
     def _set_arena_averge_score(self, players_table, team):
         players_table = players_table[players_table['arena'] == team]
@@ -141,7 +141,7 @@ class NBAPredict:
         df = df[df['cost'].notnull()]
         return df
 
-    def _set_injury_players(self, df):
+    def _get_healthy_players(self, df):
         content = requests.get('https://www.cbssports.com/nba/injuries/').content
         soup = BeautifulSoup(content,'html.parser')
         table = soup.find(name= 'div' ,attrs= {'class':'Page-colMain'})
@@ -151,6 +151,7 @@ class NBAPredict:
         for html in players_full_name:
             injury_players.append(html.find('a').text)
         df['injury'] = df['Player'].apply(lambda x: self._is_injury(x, injury_players))
+        df = df[df['injury'] == False]
         return df
     
     def _is_injury(self, player, injury_players):
@@ -260,10 +261,10 @@ class NBAPredict:
         player_table = self._concat_daily_stat()
         player_table_with_position_team = self._append_position_team(player_table, players_status)
         team_tmr = self._team_play_tomorrow(player_table_with_position_team)
-        team_with_b2b = self._set_back_to_back(team_tmr)
-        team_with_cost = self._append_cost(team_with_b2b, players_status)
-        team_with_injurylist = self._set_injury_players(team_with_cost)
-        team__with_arena = self._set_away_home(team_with_injurylist)
+        non_b2b_team = self._set_back_to_back(team_tmr)
+        team_with_cost = self._append_cost(non_b2b_team, players_status)
+        players_without_injury = self._get_healthy_players(team_with_cost)
+        team__with_arena = self._set_away_home(players_without_injury)
         team_with_avg_filter = self._avg_filter(team__with_arena)
         guards, forwards, centers = self._position_classfy(team_with_avg_filter)
         players_score = self._get_suggestion(team_with_avg_filter, guards, forwards, centers)
@@ -273,5 +274,5 @@ class NBAPredict:
         return str(result)
 
 if __name__ == '__main__':
-    predictor = NBAPredict('account','password', 'line_group', 'ifttt_key')
+    predictor = NBAPredict('aa469413927@yahoo.com.tw','a358302916', 'nba_fantasy', 'btssJUCF_1qKOVluaYsMC1')
     print(predictor.predict())
