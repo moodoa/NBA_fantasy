@@ -206,9 +206,11 @@ class NBAPredict:
                             if (guards['cost'].values[player1]+guards['cost'].values[player2]\
                                 +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
                                 +centers['cost'].values[player5]<=430)\
-                                and(guards['cost'].values[player1]+guards['cost'].values[player2]\
-                                    +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
-                                    +centers['cost'].values[player5]>=420):
+                                and len(set([guards['Player'].values[player1],
+                                            guards['Player'].values[player2],
+                                            forwards['Player'].values[player3],
+                                            forwards['Player'].values[player4],
+                                            centers['Player'].values[player5]])) == 5:
                                 team.append([guards['Player'].values[player1],
                                             guards['Player'].values[player2],
                                             forwards['Player'].values[player3],
@@ -274,5 +276,5 @@ class NBAPredict:
         return str(result)
 
 if __name__ == '__main__':
-    predictor = NBAPredict('aa469413927@yahoo.com.tw','a358302916', 'nba_fantasy', 'btssJUCF_1qKOVluaYsMC1')
-    print(predictor.predict())
+    predictor = NBAPredict('fb_account','fb_password', 'LINE_group', 'ifttt_key')
+    predictor.predict()
