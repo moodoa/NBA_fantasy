@@ -119,7 +119,7 @@ class NBAPredict:
         players_table = players_table[players_table['team'] != '']
         return players_table
 
-    def _set_back_to_back(self, team_tmr):       
+    def _set_back_to_back(self, df):       
         today = (datetime.datetime.now()-datetime.timedelta(days = 1)).strftime('%Y%m%d')
         content = requests.get(f'https://www.espn.com/nba/schedule/_/date/{today}').content
         soup = BeautifulSoup(content,'html.parser')
@@ -129,19 +129,19 @@ class NBAPredict:
         for two_team in game_result['result'].tolist():
             teams_played_today.append(two_team.split(' ')[0])
             teams_played_today.append(two_team.split(' ')[2])
-        team_tmr['b2b'] = team_tmr['team'].apply(lambda x : True if x in teams_played_today else False)
-        no_b2b_teams = team_tmr[team_tmr['b2b'] == False]
-        return no_b2b_teams
+        df['b2b'] = df['team'].apply(lambda x : True if x in teams_played_today else False)
+        non_b2b_teams = df[df['b2b'] == False]
+        return non_b2b_teams
 
-    def _append_cost(self, team_tmr, players_status):
+    def _append_cost(self, df, players_status):
         cost_dict = {}
         for idx in range(len(players_status)):
             cost_dict[players_status[idx]['firstName']+' '+players_status[idx]['lastName']] = int(players_status[idx]['rating'])
-        team_tmr['cost'] = team_tmr['Player'].apply(lambda player_name:self._is_same_player(cost_dict, player_name))
-        team_tmr = team_tmr[team_tmr['cost'].notnull()]
-        return team_tmr
+        df['cost'] = df['Player'].apply(lambda player_name:self._is_same_player(cost_dict, player_name))
+        df = df[df['cost'].notnull()]
+        return df
 
-    def _set_injury_players(self, team_tmr):
+    def _set_injury_players(self, df):
         content = requests.get('https://www.cbssports.com/nba/injuries/').content
         soup = BeautifulSoup(content,'html.parser')
         table = soup.find(name= 'div' ,attrs= {'class':'Page-colMain'})
@@ -150,8 +150,8 @@ class NBAPredict:
         injury_players = []
         for html in players_full_name:
             injury_players.append(html.find('a').text)
-        team_tmr['injury'] = team_tmr['Player'].apply(lambda x: self._is_injury(x, injury_players))
-        return team_tmr
+        df['injury'] = df['Player'].apply(lambda x: self._is_injury(x, injury_players))
+        return df
     
     def _is_injury(self, player, injury_players):
         for injury_player in injury_players:
@@ -159,7 +159,7 @@ class NBAPredict:
                 return True
         return False
     
-    def _set_away_home(self, team_tmr):
+    def _set_away_home(self, df):
         today = datetime.datetime.now()
         m, d, y = today.strftime('%m'), today.strftime('%d'), today.strftime('%Y')
         content = requests.get(f'https://stats.nba.com/scores/{m}/{d}/{y}').content
@@ -171,117 +171,107 @@ class NBAPredict:
         for team in away_home_teams:
             team_away.append(team[0:3])
             team_home.append(team[3::])
-        home = self._arena_filter(team_tmr, team_home, 'home')
-        away = self._arena_filter(team_tmr, team_away, 'away')
-        team_tmr = pd.concat([home,away])
-        return team_tmr
-
-    def _arena_filter(self, team_tmr, team_arena, home_away):
-        df = pd.DataFrame()
-        for team in team_arena:
-            for_concat = team_tmr[(team_tmr['team'] == team)&(team_tmr['arena'] == home_away)]
-            df = pd.concat([df,for_concat])
+        home = self._arena_filter(df, team_home, 'home')
+        away = self._arena_filter(df, team_away, 'away')
+        df = pd.concat([home,away])
         return df
+
+    def _arena_filter(self, df, team_arena, home_away):
+        arena_filter_df = pd.DataFrame()
+        for team in team_arena:
+            for_concat = df[(df['team'] == team)&(df['arena'] == home_away)]
+            arena_filter_df = pd.concat([arena_filter_df,for_concat])
+        return arena_filter_df
+
+    def _avg_filter(self, df):
+        df = df[df['AVG']>(df['AVG'].mean())*1.25]
+        df = df[df['cost']>=75]
+        df.reset_index(inplace=True)
+        return df
+
+    def _position_classfy(self, df):
+        guards = df[(df['position'] == 'G') | (df['position'] == 'F-G')]
+        forwards = df[(df['position'] == 'F') | (df['position'] == 'F-G')| (df['position'] == 'C-F')]
+        centers = df[(df['position'] == 'C') | (df['position'] == 'C-F')]
+        return guards, forwards, centers
+
+    def _get_suggestion(self, df, guards, forwards, centers):
+        team = []
+        for player1 in range(len(guards)-1):
+            for player2 in range(player1+1,len(guards)):
+                for player3 in range(len(forwards)-1):
+                    for player4 in range(player3+1,len(forwards)):
+                        for player5 in range(len(centers)):
+                            if (guards['cost'].values[player1]+guards['cost'].values[player2]\
+                                +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
+                                +centers['cost'].values[player5]<=430)\
+                                and(guards['cost'].values[player1]+guards['cost'].values[player2]\
+                                    +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
+                                    +centers['cost'].values[player5]>=420):
+                                team.append([guards['Player'].values[player1],
+                                            guards['Player'].values[player2],
+                                            forwards['Player'].values[player3],
+                                            forwards['Player'].values[player4],
+                                            centers['Player'].values[player5]])
+        players_score={}
+        for idx in range(len(team)):
+            score = guards[guards['Player'] == team[idx][0]]['AVG'].values[0]\
+                +guards[guards['Player'] == team[idx][1]]['AVG'].values[0]\
+                +forwards[forwards['Player'] == team[idx][2]]['AVG'].values[0]\
+                +forwards[forwards['Player'] == team[idx][3]]['AVG'].values[0]\
+                +centers[centers['Player'] == team[idx][4]]['AVG'].values[0]  
+            players_score[(team[idx][0], team[idx][1], team[idx][2], team[idx][3], team[idx][4])] = score
+        return players_score
+
+    def _get_top3_players(self, players_score):
+        rank_players_score = sorted(players_score.items(), key=lambda d: d[1], reverse=True)
+        prediction = []
+        repeat_team_check = []
+        for players in rank_players_score:
+            players_set = set(players[0])
+            if players_set not in repeat_team_check:
+                prediction.append(players[0])
+                repeat_team_check.append(players_set)
+                if len(prediction) == 3:
+                    break
+        return prediction
+
+    def _get_prediction_with_team(self, prediction, df):
+        df = df.loc[:,['Player', 'team']]
+        prediction_with_team = pd.DataFrame()
+        n = 1
+        for players in prediction:
+            prediction_with_team = pd.concat([prediction_with_team, pd.DataFrame({'Player': n, 'team':'Team'}, index=[0])])
+            n += 1
+            for player in players:
+                for_concat = df[df['Player'] == player]
+                prediction_with_team = pd.concat([prediction_with_team,for_concat])
+        prediction_with_team = prediction_with_team.set_index('team')
+        return prediction_with_team
+
+    def sent_ifttt(self, data):
+        data = str(data)
+        url = (f'https://maker.ifttt.com/trigger/{self.line_group}/with/key/{self.ifttt_key}?value1={data}')
+        result = requests.get(url) 
+        return result
 
     def predict(self):
         players_status = self._get_player_status()
         player_table = self._concat_daily_stat()
         player_table_with_position_team = self._append_position_team(player_table, players_status)
         team_tmr = self._team_play_tomorrow(player_table_with_position_team)
-        team_tmr = self._set_back_to_back(team_tmr)
-        team_tmr = self._append_cost(team_tmr, players_status)
-        team_tmr = self._set_injury_players(team_tmr)
-        team_tmr = self._set_away_home(team_tmr)
-        return team_tmr
+        team_with_b2b = self._set_back_to_back(team_tmr)
+        team_with_cost = self._append_cost(team_with_b2b, players_status)
+        team_with_injurylist = self._set_injury_players(team_with_cost)
+        team__with_arena = self._set_away_home(team_with_injurylist)
+        team_with_avg_filter = self._avg_filter(team__with_arena)
+        guards, forwards, centers = self._position_classfy(team_with_avg_filter)
+        players_score = self._get_suggestion(team_with_avg_filter, guards, forwards, centers)
+        prediction = self._get_top3_players(players_score)
+        prediction_with_team = self._get_prediction_with_team(prediction, team_with_avg_filter)
+        result = self.sent_ifttt(prediction_with_team)
+        return str(result)
 
 if __name__ == '__main__':
-    predictor = NBAPredict('acc','pass', 'a', 'b')
+    predictor = NBAPredict('account','password', 'line_group', 'ifttt_key')
     print(predictor.predict())
-
-
-
-# # make a filter and weight the AVG 
-
-# tmr_set = tmr_set[tmr_set['AVG']>(tmr_set['AVG'].mean())*1.25]
-# tmr_set = tmr_set[tmr_set['cost']>=75]
-
-# tmr_set.reset_index(inplace=True)
-# # classfy players by position
-
-# guards = tmr_set[(tmr_set['position'] == 'G') | (tmr_set['position'] == 'F-G')]
-# forwards = tmr_set[(tmr_set['position'] == 'F') | (tmr_set['position'] == 'F-G')| (tmr_set['position'] == 'C-F')]
-# centers = tmr_set[(tmr_set['position'] == 'C') | (tmr_set['position'] == 'C-F')]
-
-
-
-# # suggestion
-# team = []
-
-# for player1 in range(len(guards)-1):
-#     for player2 in range(player1+1,len(guards)):
-#         for player3 in range(len(forwards)-1):
-#             for player4 in range(player3+1,len(forwards)):
-#                 for player5 in range(len(centers)):
-#                     if (guards['cost'].values[player1]+guards['cost'].values[player2]\
-#                         +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
-#                         +centers['cost'].values[player5]<=430)\
-#                         and(guards['cost'].values[player1]+guards['cost'].values[player2]\
-#                             +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
-#                             +centers['cost'].values[player5]>=420):
-#                         team.append([guards['Player'].values[player1],
-#                                     guards['Player'].values[player2],
-#                                     forwards['Player'].values[player3],
-#                                     forwards['Player'].values[player4],
-#                                     centers['Player'].values[player5]])
-
-
-# allteam = len(team)
-# score_dict={}
-
-# for i in range(allteam):
-#     score = guards[tmr_set['Player'] == team[i][0]]['AVG'].values[0]\
-#         +guards[tmr_set['Player'] == team[i][1]]['AVG'].values[0]\
-#         +forwards[tmr_set['Player'] == team[i][2]]['AVG'].values[0]\
-#         +forwards[tmr_set['Player'] == team[i][3]]['AVG'].values[0]\
-#         +centers[tmr_set['Player'] == team[i][4]]['AVG'].values[0]  
-#     score_dict[i] = score
-
-
-# # get the predict score and index
-# rank = sorted(score_dict.items(), key=lambda d: d[1],reverse=True)
-# teamcheck = []
-# team_number = 0
-# medal = 0
-# predict = pd.DataFrame()
-# for i in range(len(rank)):
-#     player_dict={'team':str(medal+1)}
-#     teamlist=[]
-#     for player in team[rank[i][0]]:
-#         if player in teamlist:
-#             break
-#         else:
-#             teamlist.append(player)
-#     sort_team = sorted(teamlist)
-#     if len(teamlist) == 5 and sort_team not in teamcheck:
-#         teamcheck.append(sort_team)
-#         medal+=1
-#         for j in range(len(teamlist)):
-#             player_dict[teamlist[j]]=tmr_set[tmr_set['Player']==teamlist[j]]['Team'].values[0]
-#         for_concat = pd.DataFrame(list(player_dict.items()))
-#         predict = pd.concat([predict,for_concat])
-        
-#     if medal == 3 :
-#         break
-# predict.columns=['Player','Team']
-
-# predict = predict.set_index('Team')
-
-
-# # send the result to line
-# def send_ifttt(data):   
-# #     send the report to line
-#     url = (f'https://maker.ifttt.com/trigger/{self.line_group}/with/key/{self.ifttt_key}' +
-#           '?value1='+str(data))
-# #     action!!
-#     r = requests.get(url) 
-# result = send_ifttt(predict)
