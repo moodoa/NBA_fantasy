@@ -8,6 +8,7 @@ import pandas as pd
 from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from itertools import combinations
 
 class NBAPredict:
     def __init__(self, account, password, line_group, ifttt_key):
@@ -197,33 +198,38 @@ class NBAPredict:
         return guards, forwards, centers
 
     def _get_suggestion(self, df, guards, forwards, centers):
-        team = []
-        for player1 in range(len(guards)-1):
-            for player2 in range(player1+1,len(guards)):
-                for player3 in range(len(forwards)-1):
-                    for player4 in range(player3+1,len(forwards)):
-                        for player5 in range(len(centers)):
-                            if (guards['cost'].values[player1]+guards['cost'].values[player2]\
-                                +forwards['cost'].values[player3]+forwards['cost'].values[player4]\
-                                +centers['cost'].values[player5]<=430)\
-                                and len(set([guards['Player'].values[player1],
-                                            guards['Player'].values[player2],
-                                            forwards['Player'].values[player3],
-                                            forwards['Player'].values[player4],
-                                            centers['Player'].values[player5]])) == 5:
-                                team.append([guards['Player'].values[player1],
-                                            guards['Player'].values[player2],
-                                            forwards['Player'].values[player3],
-                                            forwards['Player'].values[player4],
-                                            centers['Player'].values[player5]])
-        players_score={}
-        for idx in range(len(team)):
-            score = guards[guards['Player'] == team[idx][0]]['AVG'].values[0]\
-                +guards[guards['Player'] == team[idx][1]]['AVG'].values[0]\
-                +forwards[forwards['Player'] == team[idx][2]]['AVG'].values[0]\
-                +forwards[forwards['Player'] == team[idx][3]]['AVG'].values[0]\
-                +centers[centers['Player'] == team[idx][4]]['AVG'].values[0]  
-            players_score[(team[idx][0], team[idx][1], team[idx][2], team[idx][3], team[idx][4])] = score
+        guards_list = guards.to_dict('records')
+        forwards_list = forwards.to_dict('records')
+        centers_list = centers.to_dict('records')
+        guard_pairs = []
+        for g1, g2 in combinations(guards_list, 2):
+            guard_pairs.append({
+                'players': (g1['Player'], g2['Player']),
+                'cost': g1['cost'] + g2['cost'],
+                'score': g1['AVG'] + g2['AVG']
+            })
+        forward_center_trios = []
+        for f1, f2 in combinations(forwards_list, 2):
+            for c in centers_list:
+                player_set = {f1['Player'], f2['Player'], c['Player']}
+                if len(player_set) == 3:
+                    forward_center_trios.append({
+                        'players': (f1['Player'], f2['Player'], c['Player']),
+                        'cost': f1['cost'] + f2['cost'] + c['cost'],
+                        'score': f1['AVG'] + f2['AVG'] + c['AVG']
+                    })
+        players_score = {}
+        forward_center_trios.sort(key=lambda x: x['score'], reverse=True)
+        for g_pair in guard_pairs:
+            remaining_cost = 430 - g_pair['cost']
+            for fc_trio in forward_center_trios:
+                if fc_trio['cost'] <= remaining_cost:
+                    if not set(g_pair['players']) & set(fc_trio['players']):
+                        current_score = g_pair['score'] + fc_trio['score']
+                        final_team = tuple(sorted(g_pair['players'] + fc_trio['players']))
+                        if final_team not in players_score or players_score[final_team] < current_score:
+                            players_score[final_team] = current_score
+                        break
         return players_score
 
     def _get_top3_players(self, players_score):
